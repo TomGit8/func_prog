@@ -2,10 +2,11 @@ package gui
 
 import scalafx.application.JFXApp3
 import scalafx.scene.Scene
-import scalafx.scene.control.{Button, Label, TextArea, ComboBox}
-import scalafx.scene.layout.VBox
+import scalafx.scene.control.{Button, Label, TextArea, ComboBox, TextField, TitledPane}
+import scalafx.scene.layout.{VBox, HBox, Priority}
 import scalafx.collections.ObservableBuffer
 import scalafx.Includes._
+import scalafx.geometry.{Insets, Pos}
 import parser.CsvParser
 import model.{Country, Airport, Runway}
 import service.QueryService
@@ -38,6 +39,7 @@ object GuiApp extends JFXApp3 {
 
     root = new VBox {
       spacing = 20
+      padding = Insets(20)
       children = Seq(infoLabel, queryButton, reportsButton)
     }
   }
@@ -45,37 +47,95 @@ object GuiApp extends JFXApp3 {
   // ---------------------------
   // Écran Query (Recherche)
   // ---------------------------
-  def queryScene: Scene = new Scene(600, 400) {
-    val instructionLabel = new Label("Sélectionnez un pays :")
-    // Extraction et tri des noms de pays uniques
+  def queryScene: Scene = new Scene(600, 500) {
+    // Dropdown select section
+    val dropdownLabel = new Label("Sélectionner un pays :")
     val countryNames: List[String] = countries.map(_.name).sorted.distinct
     val countryComboBox = new ComboBox[String] {
       items = ObservableBuffer(countryNames: _*)
-      promptText = "Sélectionnez un pays"
+      promptText = "Sélectionner un pays"
+      prefWidth = 200
+    }
+    val dropdownSearchButton = new Button("Chercher")
+    
+    val dropdownBox = new HBox {
+      spacing = 10
+      children = Seq(dropdownLabel, countryComboBox, dropdownSearchButton)
+      alignment = Pos.CenterLeft
+    }
+    
+    // Search bar section
+    val searchLabel = new Label("Rechercher un pays :")
+    val searchField = new TextField {
+      promptText = "Entrez un nom ou code de pays"
+      prefWidth = 200
     }
     val searchButton = new Button("Chercher")
+    
+    val searchBox = new HBox {
+      spacing = 10
+      children = Seq(searchLabel, searchField, searchButton)
+      alignment = Pos.CenterLeft
+    }
+    
+    // Results area
     val resultArea = new TextArea {
       editable = false
       wrapText = true
+      prefHeight = 300
+      vgrow = Priority.Always
     }
+    
+    // Navigation
     val backButton = new Button("Retour au menu")
+    
+    // Group input methods in collapsible panes
+    val dropdownPane = new TitledPane {
+      text = "Recherche par liste déroulante"
+      content = dropdownBox
+      expanded = true
+    }
+    
+    val searchPane = new TitledPane {
+      text = "Recherche par texte (supporte la recherche partielle)"
+      content = searchBox
+      expanded = true
+    }
 
-    // Action de recherche
-    searchButton.onAction = _ => {
-      val selectedCountry = countryComboBox.value.value
-      if (selectedCountry == null || selectedCountry.isEmpty)
-        resultArea.text = "Veuillez sélectionner un pays."
-      else {
-        val results = QueryService.findAirportsAndRunways(selectedCountry, countries, airports, runways)
-        val displayText = if (results.isEmpty)
-          s"Aucun résultat pour '$selectedCountry'."
-        else {
-          results.map { case (country, airport, runwayInfos) =>
-            s"Pays : $country\nAéroport : $airport\nRunways (le_ident) : ${runwayInfos.mkString(", ")}\n"
-          }.mkString("\n")
-        }
-        resultArea.text = displayText
+    // Dropdown search action
+    dropdownSearchButton.onAction = _ => {
+      val selectedCountry = Option(countryComboBox.value.value)
+      selectedCountry match {
+        case Some(country) if country.nonEmpty =>
+          performSearch(country)
+        case _ =>
+          resultArea.text = "Veuillez sélectionner un pays."
       }
+    }
+    
+    // Text search action
+    searchButton.onAction = _ => {
+      val searchText = searchField.text.value
+      if (searchText.isEmpty)
+        resultArea.text = "Veuillez entrer un texte de recherche."
+      else
+        performSearch(searchText)
+    }
+    
+    // Enter key in search field triggers search
+    searchField.onAction = _ => searchButton.fire()
+    
+    // Common search function
+    def performSearch(query: String): Unit = {
+      val results = QueryService.findAirportsAndRunways(query, countries, airports, runways)
+      val displayText = if (results.isEmpty)
+        s"Aucun résultat pour '$query'."
+      else {
+        results.map { case (country, airport, runwayInfos) =>
+          s"Pays : $country\nAéroport : $airport\nRunways (le_ident) : ${runwayInfos.mkString(", ")}\n"
+        }.mkString("\n")
+      }
+      resultArea.text = displayText
     }
 
     // Retour au menu principal
@@ -83,7 +143,8 @@ object GuiApp extends JFXApp3 {
 
     root = new VBox {
       spacing = 10
-      children = Seq(instructionLabel, countryComboBox, searchButton, resultArea, backButton)
+      padding = Insets(20)
+      children = Seq(dropdownPane, searchPane, resultArea, backButton)
     }
   }
 
@@ -101,7 +162,7 @@ object GuiApp extends JFXApp3 {
     }
     val backButton = new Button("Retour au menu")
 
-    // Rapport 1 : Top et Bottom 10 pays selon le nombre d’aéroports
+    // Rapport 1 : Top et Bottom 10 pays selon le nombre d'aéroports
     report1Button.onAction = _ => {
       val (top10, bottom10) = QueryService.topAndBottomCountriesByAirports(countries, airports)
       val textTop = top10.map { case (country, count) => s"$country : $count aéroports" }.mkString("\n")
@@ -131,6 +192,7 @@ object GuiApp extends JFXApp3 {
 
     root = new VBox {
       spacing = 10
+      padding = Insets(20)
       children = Seq(instructionLabel, report1Button, report2Button, report3Button, resultArea, backButton)
     }
   }
