@@ -22,7 +22,7 @@ cd parsingsmadjurb
 sbt update
 ```
 
-## Running the Application
+## Running the Application 
 
 To run the application, use the SBT `run` command:
 
@@ -32,7 +32,7 @@ sbt run
 
 The application will:
 1. Parse the CSV files (countries.csv, airports.csv, runways.csv) from resources
-2. Start the console menu interface
+2. Start the console menu interfaces
 
 ## Features
 
