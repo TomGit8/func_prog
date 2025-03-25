@@ -4,15 +4,44 @@ import model.{Country, Airport, Runway}
 
 object QueryService {
 
+  // Helper function for fuzzy matching
+  private def fuzzyMatch(input: String, target: String): Boolean = {
+    val inputLower = input.toLowerCase
+    val targetLower = target.toLowerCase
+    
+    // Exact match or substring match first (for efficiency)
+    if (targetLower == inputLower || targetLower.contains(inputLower))
+      return true
+      
+    // Check for sequence of characters in the same order
+    val inputChars = inputLower.toList
+    
+    @scala.annotation.tailrec
+    def checkSequence(remaining: List[Char], targetIndex: Int): Boolean = {
+      remaining match {
+        case Nil => true // All characters found
+        case c :: rest =>
+          val nextIndex = targetLower.indexOf(c, targetIndex)
+          if (nextIndex >= 0) 
+            checkSequence(rest, nextIndex + 1)
+          else
+            false // Character not found
+      }
+    }
+    
+    // Start sequence check from beginning of target
+    checkSequence(inputChars, 0)
+  }
+
   // M.2.2 : Recherche des aéroports et runways pour un pays (par nom ou code)
   def findAirportsAndRunways(input: String,
                              countries: List[Country],
                              airports: List[Airport],
                              runways: List[Runway]): List[(String, String, List[String])] = {
-    // Filtrer les pays correspondant (par code ou par nom)
+    // Filtrer les pays correspondant (par code ou par nom avec fuzzy matching)
     val matchedCountries = countries.filter { c =>
       c.code.equalsIgnoreCase(input) ||
-      c.name.toLowerCase.contains(input.toLowerCase)
+      fuzzyMatch(input, c.name)
     }
 
     // Regrouper les aéroports par isoCountry
@@ -31,7 +60,7 @@ object QueryService {
     }
   }
 
-  // Rapport 1 : Top 10 et Bottom 10 pays selon le nombre d’aéroports
+  // Rapport 1 : Top 10 et Bottom 10 pays selon le nombre d'aéroports
   def topAndBottomCountriesByAirports(countries: List[Country],
                                       airports: List[Airport]): (List[(String, Int)], List[(String, Int)]) = {
     // Regrouper les aéroports par isoCountry et compter
