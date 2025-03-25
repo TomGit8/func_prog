@@ -4,7 +4,7 @@ import ui.ConsoleUI
 
 object Main {
   def main(args: Array[String]): Unit = {
-    // Lecture des CSV
+    // read csv data
     val countriesLines = CsvParser.readLines("countries.csv")
     val airportsLines  = CsvParser.readLines("airports.csv")
     val runwaysLines   = CsvParser.readLines("runways.csv")
@@ -13,7 +13,7 @@ object Main {
     val airports  = airportsLines.flatMap(Airport.fromCsv)
     val runways   = runwaysLines.flatMap(Runway.fromCsv)
 
-    // Lancement de l'UI (menu)
+    // start the ui menu
     ConsoleUI.run(countries, airports, runways)
   }
 }
