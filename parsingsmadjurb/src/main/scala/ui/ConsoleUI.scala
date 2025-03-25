@@ -40,12 +40,12 @@ object ConsoleUI {
     println("=== QUERY MODE ===")
     println("Entrez un nom de pays ou un code pays :")
     val input = StdIn.readLine().trim
-    val result = QueryService.findAirportsAndRunways(input, countries, airports, runways)
-    if (result.isEmpty)
+    val results = QueryService.findAirportsAndRunways(input, countries, airports, runways)
+    if (results.isEmpty)
       println(s"Aucun résultat pour '$input'.")
     else
-      result.foreach { case (countryName, airportName, runwayInfos) =>
-        println(s"Pays : $countryName | Aéroport : $airportName | Runways (le_ident) : ${runwayInfos.mkString(", ")}")
+      results.foreach { case (countryName, airportName, runwayIds) =>
+        println(s"Pays : $countryName | Aéroport : $airportName | Runways (le_ident) : ${runwayIds.mkString(", ")}")
       }
     println("Appuyez sur Entrée pour revenir au menu principal.")
     StdIn.readLine()
@@ -79,9 +79,9 @@ object ConsoleUI {
         StdIn.readLine()
         reportsMenu(countries, airports, runways)
       case "3" =>
-        val topLeIdent = QueryService.topLeIdent(runways)
+        val topRunwayIds = QueryService.topLeIdent(runways)
         println("Top 10 des runway (le_ident) :")
-        topLeIdent.foreach { case (ident, count) =>
+        topRunwayIds.foreach { case (ident, count) =>
           println(s"$ident : $count occurrences")
         }
         println("Appuyez sur Entrée pour continuer.")
