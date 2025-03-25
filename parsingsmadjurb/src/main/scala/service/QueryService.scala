@@ -10,27 +10,28 @@ object QueryService {
     val targetLower = target.toLowerCase
     
     // Exact match or substring match first (for efficiency)
-    if (targetLower == inputLower || targetLower.contains(inputLower))
-      return true
+    if (targetLower == inputLower || targetLower.contains(inputLower)) {
+      true
+    } else {
+      // Check for sequence of characters in the same order
+      val inputChars = inputLower.toList
       
-    // Check for sequence of characters in the same order
-    val inputChars = inputLower.toList
-    
-    @scala.annotation.tailrec
-    def checkSequence(remaining: List[Char], targetIndex: Int): Boolean = {
-      remaining match {
-        case Nil => true // All characters found
-        case c :: rest =>
-          val nextIndex = targetLower.indexOf(c, targetIndex)
-          if (nextIndex >= 0) 
-            checkSequence(rest, nextIndex + 1)
-          else
-            false // Character not found
+      @scala.annotation.tailrec
+      def checkSequence(remaining: List[Char], targetIndex: Int): Boolean = {
+        remaining match {
+          case Nil => true // All characters found
+          case c :: rest =>
+            val nextIndex = targetLower.indexOf(c, targetIndex)
+            if (nextIndex >= 0) 
+              checkSequence(rest, nextIndex + 1)
+            else
+              false // Character not found
+        }
       }
+      
+      // Start sequence check from beginning of target
+      checkSequence(inputChars, 0)
     }
-    
-    // Start sequence check from beginning of target
-    checkSequence(inputChars, 0)
   }
 
   // M.2.2 : Recherche des aéroports et runways pour un pays (par nom ou code)
