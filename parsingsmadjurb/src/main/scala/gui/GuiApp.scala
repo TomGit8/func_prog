@@ -2,7 +2,7 @@ package gui
 
 import scalafx.application.JFXApp3
 import scalafx.scene.Scene
-import scalafx.scene.control.{Button, Label, TextArea, ComboBox, TextField, TitledPane}
+import scalafx.scene.control.{Button, Label, TextArea, ComboBox, TextField, TitledPane, ScrollPane}
 import scalafx.scene.layout.{VBox, HBox, Priority}
 import scalafx.collections.ObservableBuffer
 import scalafx.Includes._
@@ -10,6 +10,8 @@ import scalafx.geometry.{Insets, Pos}
 import parser.CsvParser
 import model.{Country, Airport, Runway}
 import service.QueryService
+import scalafx.scene.chart._
+import scalafx.scene.layout.Region
 
 object GuiApp extends JFXApp3 {
 
@@ -28,7 +30,10 @@ object GuiApp extends JFXApp3 {
   // ---------------------------
   // Écran principal (Menu)
   // ---------------------------
-  def mainMenuScene: Scene = new Scene(400, 300) {
+  def mainMenuScene: Scene = new Scene(800, 600) {
+    val titleLabel   = new Label("Airport Runway Analyzer") {
+      style = "-fx-font-size: 24px; -fx-font-weight: bold;"
+    }
     val infoLabel    = new Label("Choisissez une option:")
     val queryButton  = new Button("Query (Requête)")
     val reportsButton = new Button("Reports (Statistiques)")
@@ -39,8 +44,9 @@ object GuiApp extends JFXApp3 {
 
     root = new VBox {
       spacing = 20
-      padding = Insets(20)
-      children = Seq(infoLabel, queryButton, reportsButton)
+      padding = Insets(40)
+      alignment = Pos.Center
+      children = Seq(titleLabel, infoLabel, queryButton, reportsButton)
     }
   }
 
@@ -151,20 +157,58 @@ object GuiApp extends JFXApp3 {
   // ---------------------------
   // Écran Reports (Statistiques)
   // ---------------------------
-  def reportsScene: Scene = new Scene(600, 500) {
-    val instructionLabel = new Label("Sélectionnez un rapport :")
+  def reportsScene: Scene = new Scene(800, 700) {
+    val instructionLabel = new Label("Sélectionnez un rapport :") {
+      style = "-fx-font-size: 18px; -fx-font-weight: bold;"
+    }
     val report1Button = new Button("Top/Bottom 10 pays par aéroports")
     val report2Button = new Button("Types de surfaces par pays")
     val report3Button = new Button("Top 10 des runway (le_ident) fréquents")
+    
+    val chartContainer = new VBox {
+      spacing = 10
+      maxHeight = 400
+      visible = false
+    }
+    
     val resultArea = new TextArea {
       editable = false
       wrapText = true
+      prefHeight = 200
     }
+    
     val backButton = new Button("Retour au menu")
 
     // Rapport 1 : Top et Bottom 10 pays selon le nombre d'aéroports
     report1Button.onAction = _ => {
       val (top10, bottom10) = QueryService.topAndBottomCountriesByAirports(countries, airports)
+      
+      // Create bar chart for top 10
+      val xAxis = new CategoryAxis {
+        label = "Pays"
+      }
+      val yAxis = new NumberAxis {
+        label = "Nombre d'aéroports"
+      }
+      
+      val barChart = new BarChart(xAxis, yAxis) {
+        title = "Top 10 pays par nombre d'aéroports"
+        categoryGap = 20
+      }
+      
+      val series = new XYChart.Series[String, Number] {
+        name = "Nombre d'aéroports"
+        data = top10.map { case (country, count) =>
+          XYChart.Data[String, Number](country, count)
+        }
+      }
+      
+      barChart.data() += series
+      
+      // Update UI
+      chartContainer.children = Seq(barChart)
+      chartContainer.visible = true
+      
       val textTop = top10.map { case (country, count) => s"$country : $count aéroports" }.mkString("\n")
       val textBottom = bottom10.map { case (country, count) => s"$country : $count aéroports" }.mkString("\n")
       resultArea.text = s"=== TOP 10 ===\n$textTop\n\n=== BOTTOM 10 ===\n$textBottom"
@@ -173,6 +217,21 @@ object GuiApp extends JFXApp3 {
     // Rapport 2 : Types de surfaces par pays
     report2Button.onAction = _ => {
       val surfaces = QueryService.runwaySurfacesByCountry(countries, airports, runways)
+      
+      // Create pie chart for the most common surface types
+      val surfaceCount = surfaces.flatMap(_._2).groupBy(identity).mapValues(_.size).toSeq.sortBy(-_._2).take(5)
+      
+      val pieChart = new PieChart {
+        title = "Distribution des types de surfaces les plus communs"
+        data = surfaceCount.map { case (surface, count) =>
+          PieChart.Data(surface, count)
+        }
+      }
+      
+      // Update UI
+      chartContainer.children = Seq(pieChart)
+      chartContainer.visible = true
+      
       val text = surfaces.map { case (country, surfaceSet) =>
         s"$country : ${surfaceSet.mkString(", ")}"
       }.mkString("\n")
@@ -182,6 +241,33 @@ object GuiApp extends JFXApp3 {
     // Rapport 3 : Top 10 des runway (le_ident) les plus fréquents
     report3Button.onAction = _ => {
       val topLeIdent = QueryService.topLeIdent(runways)
+      
+      // Create bar chart for top 10 le_ident
+      val xAxis = new CategoryAxis {
+        label = "Runway Identifier"
+      }
+      val yAxis = new NumberAxis {
+        label = "Nombre d'occurrences"
+      }
+      
+      val barChart = new BarChart(xAxis, yAxis) {
+        title = "Top 10 des identifiants de piste les plus fréquents"
+        categoryGap = 20
+      }
+      
+      val series = new XYChart.Series[String, Number] {
+        name = "Occurrences"
+        data = topLeIdent.map { case (ident, count) =>
+          XYChart.Data[String, Number](ident, count)
+        }
+      }
+      
+      barChart.data() += series
+      
+      // Update UI
+      chartContainer.children = Seq(barChart)
+      chartContainer.visible = true
+      
       val text = topLeIdent.map { case (ident, count) =>
         s"$ident : $count occurrences"
       }.mkString("\n")
@@ -191,9 +277,18 @@ object GuiApp extends JFXApp3 {
     backButton.onAction = _ => stage.scene = mainMenuScene
 
     root = new VBox {
-      spacing = 10
+      spacing = 20
       padding = Insets(20)
-      children = Seq(instructionLabel, report1Button, report2Button, report3Button, resultArea, backButton)
+      children = Seq(
+        instructionLabel,
+        new HBox {
+          spacing = 10
+          children = Seq(report1Button, report2Button, report3Button)
+        },
+        chartContainer,
+        resultArea,
+        backButton
+      )
     }
   }
 }
