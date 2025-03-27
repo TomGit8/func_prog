@@ -3,6 +3,8 @@ package service
 import model.{Country, Airport, Runway}
 
 object QueryService {
+  case class QueryResult(country: String, airport: String, runways: List[String])
+  case class QueryError(message: String)
 
   // fuzzy match helper - checks if input partially matches target string
   private def fuzzyMatch(input: String, target: String): Boolean = {
@@ -34,70 +36,85 @@ object QueryService {
     }
   }
 
-  // finds airports and runways for a country by name or code
-  def findAirportsAndRunways(input: String,
-                             countries: List[Country],
-                             airports: List[Airport],
-                             runways: List[Runway]): List[(String, String, List[String])] = {
-    // find matching countries by code or fuzzy name match
-    val matchedCountries = countries.filter { c =>
-      c.code.equalsIgnoreCase(input) ||
-      fuzzyMatch(input, c.name)
-    }
+  def validateQuery(query: String): Either[QueryError, String] = {
+    if (query.trim.isEmpty) Left(QueryError("La recherche ne peut pas être vide"))
+    else if (query.length < 2) Left(QueryError("La recherche doit contenir au moins 2 caractères"))
+    else Right(query.trim)
+  }
 
-    // group airports by country code
-    val airportsByCountry = airports.groupBy(_.isoCountry)
-    // group runways by airport id
-    val runwaysByAirport = runways.groupBy(_.airportRef)
+  def findAirportsAndRunways(query: String, countries: List[Country], airports: List[Airport], runways: List[Runway]): Either[QueryError, List[QueryResult]] = {
+    validateQuery(query).map { validQuery =>
+      val matchingCountries = countries.filter(country =>
+        country.name.toLowerCase.contains(validQuery.toLowerCase) ||
+        country.code.toLowerCase.contains(validQuery.toLowerCase)
+      )
 
-    // build result: (country name, airport name, runway identifiers)
-    matchedCountries.flatMap { country =>
-      val countryAirports = airportsByCountry.getOrElse(country.code, List())
-      countryAirports.map { airport =>
-        val airportRunways = runwaysByAirport.getOrElse(airport.id, List())
-        val runwayIdentifiers = airportRunways.map(_.le_ident)
-        (country.name, airport.name, runwayIdentifiers)
+      if (matchingCountries.isEmpty) {
+        return Left(QueryError(s"Aucun pays trouvé pour la recherche: $validQuery"))
       }
-    }
+
+      val results = for {
+        country <- matchingCountries
+        airport <- airports.filter(_.isoCountry == country.code)
+        airportRunways = runways.filter(_.airportRef == airport.id).map(_.le_ident)
+        if airportRunways.nonEmpty
+      } yield QueryResult(country.name, airport.name, airportRunways)
+
+      Right(results)
+    }.flatten
   }
 
   // report 1: countries with most and least airports
-  def topAndBottomCountriesByAirports(countries: List[Country],
-                                      airports: List[Airport]): (List[(String, Int)], List[(String, Int)]) = {
-    // count airports per country
-    val countByIso: Map[String, Int] = airports.groupBy(_.isoCountry).mapValues(_.size).toMap
-    // map from country code to name
-    val codeToName: Map[String, String] = countries.map(c => c.code -> c.name).toMap
-    // convert to (country name, airport count) pairs
-    val airportCounts: List[(String, Int)] = countByIso.toList.map { case (iso, count) =>
-      (codeToName.getOrElse(iso, iso), count)
+  def topAndBottomCountriesByAirports(countries: List[Country], airports: List[Airport]): Either[QueryError, (List[(String, Int)], List[(String, Int)])] = {
+    if (countries.isEmpty || airports.isEmpty) {
+      Left(QueryError("Données manquantes pour générer le rapport"))
+    } else {
+      val airportsByCountry = airports
+        .groupBy(_.isoCountry)
+        .map { case (countryCode, airportList) =>
+          val countryName = countries.find(_.code == countryCode).map(_.name).getOrElse(countryCode)
+          (countryName, airportList.length)
+        }
+        .toList
+
+      val top10 = airportsByCountry.sortBy(-_._2).take(10)
+      val bottom10 = airportsByCountry.sortBy(_._2).take(10)
+      Right((top10, bottom10))
     }
-    // sort by count
-    val sorted = airportCounts.sortBy(_._2)
-    val bottom10 = sorted.take(10)
-    val top10 = sorted.reverse.take(10)
-    (top10, bottom10)
   }
 
   // report 2: runway surface types by country
-  def runwaySurfacesByCountry(countries: List[Country],
-                              airports: List[Airport],
-                              runways: List[Runway]): List[(String, Set[String])] = {
-    val airportsByCountry = airports.groupBy(_.isoCountry)
-    val runwaysByAirport = runways.groupBy(_.airportRef)
-    val codeToName: Map[String, String] = countries.map(c => c.code -> c.name).toMap
+  def runwaySurfacesByCountry(countries: List[Country], airports: List[Airport], runways: List[Runway]): Either[QueryError, Map[String, Set[String]]] = {
+    if (countries.isEmpty || airports.isEmpty || runways.isEmpty) {
+      Left(QueryError("Données manquantes pour générer le rapport"))
+    } else {
+      val airportCountryMap = airports.map(a => a.id -> a.isoCountry).toMap
+      val countryNameMap = countries.map(c => c.code -> c.name).toMap
+      
+      val surfacesByCountry = runways
+        .filter(r => airportCountryMap.contains(r.airportRef))
+        .groupBy(r => countryNameMap.getOrElse(airportCountryMap(r.airportRef), "Unknown"))
+        .view
+        .mapValues(_.map(_.surface).toSet)
+        .toMap
 
-    airportsByCountry.toList.map { case (iso, airportList) =>
-      val countryName = codeToName.getOrElse(iso, iso)
-      // get all runway surfaces for each airport
-      val surfaces = airportList.flatMap(a => runwaysByAirport.getOrElse(a.id, List()).map(_.surface))
-      (countryName, surfaces.toSet)
+      Right(surfacesByCountry)
     }
   }
 
   // report 3: most common runway identifiers
-  def topLeIdent(runways: List[Runway]): List[(String, Int)] = {
-    val countByLeIdent: Map[String, Int] = runways.groupBy(_.le_ident).mapValues(_.size).toMap
-    countByLeIdent.toList.sortBy(-_._2).take(10)
+  def topLeIdent(runways: List[Runway]): Either[QueryError, List[(String, Int)]] = {
+    if (runways.isEmpty) {
+      Left(QueryError("Données manquantes pour générer le rapport"))
+    } else {
+      val top10 = runways
+        .groupBy(_.le_ident)
+        .view
+        .mapValues(_.length)
+        .toList
+        .sortBy(-_._2)
+        .take(10)
+      Right(top10)
+    }
   }
 }

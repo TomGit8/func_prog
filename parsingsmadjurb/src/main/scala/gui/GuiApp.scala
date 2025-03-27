@@ -1,9 +1,10 @@
 package gui
 
 import scalafx.application.JFXApp3
+import scalafx.application.Platform
 import scalafx.scene.Scene
-import scalafx.scene.control.{Button, Label, TextArea, ComboBox, TextField, TitledPane, ScrollPane}
-import scalafx.scene.layout.{VBox, HBox, Priority}
+import scalafx.scene.control.{Button, Label, TextArea, ComboBox, TextField, TitledPane, ScrollPane, ProgressIndicator}
+import scalafx.scene.layout.{VBox, HBox, Priority, StackPane}
 import scalafx.collections.ObservableBuffer
 import scalafx.Includes._
 import scalafx.geometry.{Insets, Pos}
@@ -12,19 +13,75 @@ import model.{Country, Airport, Runway}
 import service.QueryService
 import scalafx.scene.chart._
 import scalafx.scene.layout.Region
+import scala.concurrent.Future
+import scala.concurrent.ExecutionContext.Implicits.global
 
 object GuiApp extends JFXApp3 {
 
-  // Charger les données CSV dès le démarrage (les CSV doivent être dans src/main/resources)
-  val countries: List[Country] = CsvParser.readLines("countries.csv").flatMap(Country.fromCsv)
-  val airports: List[Airport]   = CsvParser.readLines("airports.csv").flatMap(Airport.fromCsv)
-  val runways: List[Runway]      = CsvParser.readLines("runways.csv").flatMap(Runway.fromCsv)
+  // UI Components that need to be accessed globally
+  private var countryComboBox: ComboBox[String] = _
+  private var loadingIndicator: ProgressIndicator = _
+  private var resultArea: TextArea = _
+  
+  // Data
+  private var countriesData: List[Country] = List.empty
+  private var airportsData: List[Airport] = List.empty
+  private var runwaysData: List[Runway] = List.empty
 
   override def start(): Unit = {
+    // Initialize UI components after platform is started
+    countryComboBox = new ComboBox[String] {
+      promptText = "Sélectionner un pays"
+      prefWidth = 200
+    }
+    
+    loadingIndicator = new ProgressIndicator {
+      visible = false
+    }
+    
+    resultArea = new TextArea {
+      editable = false
+      wrapText = true
+      prefHeight = 300
+      vgrow = Priority.Always
+    }
+
     stage = new JFXApp3.PrimaryStage {
       title = "Airport Runway Analyzer - GUI"
       scene = mainMenuScene
     }
+    
+    // Load data when application starts
+    loadData()
+  }
+
+  private def loadData(): Future[Unit] = {
+    Platform.runLater {
+      loadingIndicator.visible = true
+    }
+    
+    val countriesFuture = Future { CsvParser.readLines("countries.csv").flatMap(Country.fromCsv) }
+    val airportsFuture = Future { CsvParser.readLines("airports.csv").flatMap(Airport.fromCsv) }
+    val runwaysFuture = Future { CsvParser.readLines("runways.csv").flatMap(Runway.fromCsv) }
+
+    for {
+      countries <- countriesFuture
+      airports <- airportsFuture
+      runways <- runwaysFuture
+    } yield {
+      Platform.runLater {
+        countriesData = countries
+        airportsData = airports
+        runwaysData = runways
+        updateUI()
+        loadingIndicator.visible = false
+      }
+    }
+  }
+
+  private def updateUI(): Unit = {
+    val countryNames = countriesData.map(_.name).sorted.distinct
+    countryComboBox.items = ObservableBuffer(countryNames: _*)
   }
 
   // ---------------------------
@@ -56,13 +113,13 @@ object GuiApp extends JFXApp3 {
   def queryScene: Scene = new Scene(600, 500) {
     // Dropdown select section
     val dropdownLabel = new Label("Sélectionner un pays :")
-    val countryNames: List[String] = countries.map(_.name).sorted.distinct
-    val countryComboBox = new ComboBox[String] {
-      items = ObservableBuffer(countryNames: _*)
-      promptText = "Sélectionner un pays"
-      prefWidth = 200
-    }
     val dropdownSearchButton = new Button("Chercher")
+    
+    val loadingBox = new StackPane {
+      children = Seq(loadingIndicator)
+      alignment = Pos.Center
+      visible = false
+    }
     
     val dropdownBox = new HBox {
       spacing = 10
@@ -83,17 +140,6 @@ object GuiApp extends JFXApp3 {
       children = Seq(searchLabel, searchField, searchButton)
       alignment = Pos.CenterLeft
     }
-    
-    // Results area
-    val resultArea = new TextArea {
-      editable = false
-      wrapText = true
-      prefHeight = 300
-      vgrow = Priority.Always
-    }
-    
-    // Navigation
-    val backButton = new Button("Retour au menu")
     
     // Group input methods in collapsible panes
     val dropdownPane = new TitledPane {
@@ -133,18 +179,26 @@ object GuiApp extends JFXApp3 {
     
     // Common search function
     def performSearch(query: String): Unit = {
-      val results = QueryService.findAirportsAndRunways(query, countries, airports, runways)
-      val displayText = if (results.isEmpty)
-        s"Aucun résultat pour '$query'."
-      else {
-        results.map { case (country, airport, runwayInfos) =>
-          s"Pays : $country\nAéroport : $airport\nRunways (le_ident) : ${runwayInfos.mkString(", ")}\n"
-        }.mkString("\n")
+      loadingIndicator.visible = true
+      Future {
+        QueryService.findAirportsAndRunways(query, countriesData, airportsData, runwaysData)
+      }.map { resultsEither =>
+        Platform.runLater {
+          val displayText = resultsEither match {
+            case Left(error) => error.message
+            case Right(results) if results.isEmpty => s"Aucun résultat pour '$query'."
+            case Right(results) => results.map { result =>
+              s"Pays : ${result.country}\nAéroport : ${result.airport}\nRunways (le_ident) : ${result.runways.mkString(", ")}\n"
+            }.mkString("\n")
+          }
+          resultArea.text = displayText
+          loadingIndicator.visible = false
+        }
       }
-      resultArea.text = displayText
     }
 
     // Retour au menu principal
+    val backButton = new Button("Retour au menu")
     backButton.onAction = _ => stage.scene = mainMenuScene
 
     root = new VBox {
@@ -181,97 +235,112 @@ object GuiApp extends JFXApp3 {
 
     // Rapport 1 : Top et Bottom 10 pays selon le nombre d'aéroports
     report1Button.onAction = _ => {
-      val (top10, bottom10) = QueryService.topAndBottomCountriesByAirports(countries, airports)
-      
-      // Create bar chart for top 10
-      val xAxis = new CategoryAxis {
-        label = "Pays"
+      QueryService.topAndBottomCountriesByAirports(countriesData, airportsData) match {
+        case Left(error) =>
+          resultArea.text = error.message
+          chartContainer.visible = false
+        
+        case Right((top10, bottom10)) =>
+          // Create bar chart for top 10
+          val xAxis = new CategoryAxis {
+            label = "Pays"
+          }
+          val yAxis = new NumberAxis {
+            label = "Nombre d'aéroports"
+          }
+          
+          val barChart = new BarChart(xAxis, yAxis) {
+            title = "Top 10 pays par nombre d'aéroports"
+            categoryGap = 20
+          }
+          
+          val series = new XYChart.Series[String, Number] {
+            name = "Nombre d'aéroports"
+            data = top10.map { case (country, count) =>
+              XYChart.Data[String, Number](country, count)
+            }
+          }
+          
+          barChart.data() += series
+          
+          // Update UI
+          chartContainer.children = Seq(barChart)
+          chartContainer.visible = true
+          
+          val textTop = top10.map { case (country, count) => s"$country : $count aéroports" }.mkString("\n")
+          val textBottom = bottom10.map { case (country, count) => s"$country : $count aéroports" }.mkString("\n")
+          resultArea.text = s"=== TOP 10 ===\n$textTop\n\n=== BOTTOM 10 ===\n$textBottom"
       }
-      val yAxis = new NumberAxis {
-        label = "Nombre d'aéroports"
-      }
-      
-      val barChart = new BarChart(xAxis, yAxis) {
-        title = "Top 10 pays par nombre d'aéroports"
-        categoryGap = 20
-      }
-      
-      val series = new XYChart.Series[String, Number] {
-        name = "Nombre d'aéroports"
-        data = top10.map { case (country, count) =>
-          XYChart.Data[String, Number](country, count)
-        }
-      }
-      
-      barChart.data() += series
-      
-      // Update UI
-      chartContainer.children = Seq(barChart)
-      chartContainer.visible = true
-      
-      val textTop = top10.map { case (country, count) => s"$country : $count aéroports" }.mkString("\n")
-      val textBottom = bottom10.map { case (country, count) => s"$country : $count aéroports" }.mkString("\n")
-      resultArea.text = s"=== TOP 10 ===\n$textTop\n\n=== BOTTOM 10 ===\n$textBottom"
     }
 
     // Rapport 2 : Types de surfaces par pays
     report2Button.onAction = _ => {
-      val surfaces = QueryService.runwaySurfacesByCountry(countries, airports, runways)
-      
-      // Create pie chart for the most common surface types
-      val surfaceCount = surfaces.flatMap(_._2).groupBy(identity).mapValues(_.size).toSeq.sortBy(-_._2).take(5)
-      
-      val pieChart = new PieChart {
-        title = "Distribution des types de surfaces les plus communs"
-        data = surfaceCount.map { case (surface, count) =>
-          PieChart.Data(surface, count)
-        }
+      QueryService.runwaySurfacesByCountry(countriesData, airportsData, runwaysData) match {
+        case Left(error) =>
+          resultArea.text = error.message
+          chartContainer.visible = false
+          
+        case Right(surfaces) =>
+          // Create pie chart for the most common surface types
+          val surfaceCount = surfaces.values.flatten.groupBy(identity).view.mapValues(_.size).toSeq.sortBy(-_._2).take(5)
+          
+          val pieChart = new PieChart {
+            title = "Distribution des types de surfaces les plus communs"
+            data = surfaceCount.map { case (surface, count) =>
+              PieChart.Data(surface, count)
+            }
+          }
+          
+          // Update UI
+          chartContainer.children = Seq(pieChart)
+          chartContainer.visible = true
+          
+          val text = surfaces.map { case (country, surfaceSet) =>
+            s"$country : ${surfaceSet.mkString(", ")}"
+          }.mkString("\n")
+          resultArea.text = text
       }
-      
-      // Update UI
-      chartContainer.children = Seq(pieChart)
-      chartContainer.visible = true
-      
-      val text = surfaces.map { case (country, surfaceSet) =>
-        s"$country : ${surfaceSet.mkString(", ")}"
-      }.mkString("\n")
-      resultArea.text = text
     }
 
     // Rapport 3 : Top 10 des runway (le_ident) les plus fréquents
     report3Button.onAction = _ => {
-      val topLeIdent = QueryService.topLeIdent(runways)
-      
-      // Create bar chart for top 10 le_ident
-      val xAxis = new CategoryAxis {
-        label = "Runway Identifier"
+      QueryService.topLeIdent(runwaysData) match {
+        case Left(error) =>
+          resultArea.text = error.message
+          chartContainer.visible = false
+          
+        case Right(topLeIdent) =>
+          // Create bar chart for top 10 le_ident
+          val xAxis = new CategoryAxis {
+            label = "Runway Identifier"
+          }
+          val yAxis = new NumberAxis {
+            label = "Nombre d'occurrences"
+          }
+          
+          val barChart = new BarChart(xAxis, yAxis) {
+            title = "Top 10 des identifiants de piste les plus fréquents"
+            categoryGap = 20
+          }
+          
+          val series = new XYChart.Series[String, Number] {
+            name = "Occurrences"
+            data = topLeIdent.map { case (ident, count) =>
+              XYChart.Data[String, Number](ident, count)
+            }
+          }
+          
+          barChart.data() += series
+          
+          // Update UI
+          chartContainer.children = Seq(barChart)
+          chartContainer.visible = true
+          
+          val text = topLeIdent.map { case (ident, count) =>
+            s"$ident : $count occurrences"
+          }.mkString("\n")
+          resultArea.text = text
       }
-      val yAxis = new NumberAxis {
-        label = "Nombre d'occurrences"
-      }
-      
-      val barChart = new BarChart(xAxis, yAxis) {
-        title = "Top 10 des identifiants de piste les plus fréquents"
-        categoryGap = 20
-      }
-      
-      val series = new XYChart.Series[String, Number] {
-        name = "Occurrences"
-        data = topLeIdent.map { case (ident, count) =>
-          XYChart.Data[String, Number](ident, count)
-        }
-      }
-      
-      barChart.data() += series
-      
-      // Update UI
-      chartContainer.children = Seq(barChart)
-      chartContainer.visible = true
-      
-      val text = topLeIdent.map { case (ident, count) =>
-        s"$ident : $count occurrences"
-      }.mkString("\n")
-      resultArea.text = text
     }
 
     backButton.onAction = _ => stage.scene = mainMenuScene
