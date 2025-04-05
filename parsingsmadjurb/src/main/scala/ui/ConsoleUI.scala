@@ -7,28 +7,31 @@ import scala.annotation.tailrec
 
 object ConsoleUI {
 
+  // This is the main function to start the menu
   def run(countries: List[Country], airports: List[Airport], runways: List[Runway]): Unit = {
     mainMenu(countries, airports, runways)
   }
 
+  // This is the main menu. It keeps running until the user chooses to exit.
   @tailrec
   def mainMenu(countries: List[Country], airports: List[Airport], runways: List[Runway]): Unit = {
-    displayMainMenu()
+    displayMainMenu() // show menu
     scala.io.StdIn.readLine().trim match {
       case "1" =>
-        handleQuery(countries, airports, runways)
-        mainMenu(countries, airports, runways)
+        handleQuery(countries, airports, runways) // go to query
+        mainMenu(countries, airports, runways)    // back to menu after
       case "2" =>
-        handleReports(countries, airports, runways)
+        handleReports(countries, airports, runways) // go to reports
         mainMenu(countries, airports, runways)
       case "3" =>
-        println("Au revoir !")
+        println("Au revoir !") // exit message
       case _ =>
-        println("Option invalide. Veuillez réessayer.")
+        println("Option invalide. Veuillez réessayer.") // wrong input
         mainMenu(countries, airports, runways)
     }
   }
 
+  // This function just prints the main menu
   private def displayMainMenu(): Unit = {
     println("\n=== Airport Runway Analyzer ===")
     println("1. Query")
@@ -37,16 +40,18 @@ object ConsoleUI {
     print("Choose an option (1-3): ")
   }
 
+  // This handles the query mode
   private def handleQuery(countries: List[Country], airports: List[Airport], runways: List[Runway]): Unit = {
     println("\n=== Query Mode ===")
     println("Enter a country name or code (or 'back' to return to main menu):")
     val input = scala.io.StdIn.readLine().trim
 
     if (input.toLowerCase != "back") {
+      // Call the service to get airports and runways
       val result = QueryService.findAirportsAndRunways(input, countries, airports, runways)
       result match {
         case Left(error) =>
-          println(s"\nError: ${error.message}")
+          println(s"\nError: ${error.message}") // show error
         
         case Right(queryResults) =>
           if (queryResults.isEmpty) {
@@ -65,8 +70,9 @@ object ConsoleUI {
     }
   }
 
+  // This handles the reports menu
   private def handleReports(countries: List[Country], airports: List[Airport], runways: List[Runway]): Unit = {
-    var showReportsMenu = true
+    var showReportsMenu = true // loop until user chooses to go back
     while (showReportsMenu) {
       println("\n=== Reports Menu ===")
       println("1. Top/Bottom 10 countries by airports count")
@@ -130,10 +136,10 @@ object ConsoleUI {
           scala.io.StdIn.readLine()
 
         case "4" =>
-          showReportsMenu = false
+          showReportsMenu = false // exit the reports menu
 
         case _ =>
-          println("\nInvalid option. Please try again.")
+          println("\nInvalid option. Please try again.") // wrong input
       }
     }
   }
